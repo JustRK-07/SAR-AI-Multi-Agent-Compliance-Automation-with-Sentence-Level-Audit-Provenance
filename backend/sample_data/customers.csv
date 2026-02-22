@@ -1,0 +1,4 @@
+id,name,dob,pan,address,occupation,income_source,account_number,account_type,account_open_date
+CUST001,Rajesh Kumar,1980-05-12,ABCPK1234F,45 MG Road Mumbai,Business Owner,Trading Business,9876543210,SAVINGS,2019-03-15
+CUST002,Priya Sharma,1992-08-22,BCQPS5678G,123 Park Street Kolkata,Software Engineer,Salary,8765432109,SAVINGS,2021-06-20
+CUST003,Mohammed Ali,1975-11-30,CDRAM9012H,78 Anna Nagar Chennai,Retail Shop Owner,Shop Income,7654321098,CURRENT,2018-01-10

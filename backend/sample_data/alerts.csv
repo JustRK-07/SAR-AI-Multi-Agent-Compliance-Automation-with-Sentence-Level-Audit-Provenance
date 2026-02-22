@@ -1,0 +1,4 @@
+id,customer_id,trigger_date,scenario,risk_score,status
+ALT001,CUST001,2024-01-15,Structuring,85,pending
+ALT002,CUST002,2024-01-20,Rapid Movement,72,pending
+ALT003,CUST003,2024-02-01,Layering,90,pending

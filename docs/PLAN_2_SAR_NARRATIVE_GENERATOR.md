@@ -701,37 +701,147 @@ class AuditTrail:
         }
 ```
 
-#### **5.2 Interactive Audit Explorer**
+#### **5.2 Interactive Audit Explorer (React Component)**
 
-```python
-import streamlit as st
+```tsx
+// components/audit/InteractiveAuditExplorer.tsx
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Card } from '@/components/common/Card';
+import { cn } from '@/utils/cn';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
-def render_interactive_audit_trail(narrative, audit_trail):
-    st.title("📄 SAR Narrative with Audit Trail")
+interface AuditExplorerProps {
+  sarId: string;
+  narrative: string;
+}
 
-    # Split narrative into sentences
-    sentences = narrative.split('. ')
+export default function InteractiveAuditExplorer({ sarId, narrative }: AuditExplorerProps) {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
-    for i, sentence in enumerate(sentences):
-        # Highlight clickable sentence
-        if st.button(f"📌 {sentence}", key=f"sent_{i}"):
-            # Show evidence panel
-            evidence = audit_trail.get_evidence_for_sentence(i)
+  // Fetch evidence when sentence is selected
+  const { data: evidence, isLoading } = useQuery({
+    queryKey: ['evidence', sarId, selectedIndex],
+    queryFn: () => fetch(`/api/sar/${sarId}/evidence/${selectedIndex}`).then(r => r.json()),
+    enabled: selectedIndex !== null,
+  });
 
-            with st.expander("🔍 Evidence", expanded=True):
-                st.markdown("### Data Source")
-                st.code(evidence['query'], language='sql')
+  const sentences = narrative.split(/(?<=[.!?])\s+/);
 
-                st.markdown("### Query Results")
-                st.dataframe(evidence['results'])
+  return (
+    <div className="h-screen flex">
+      {/* Left Panel: Narrative */}
+      <div className="w-1/2 p-6 overflow-y-auto border-r">
+        <h1 className="text-2xl font-bold mb-6">SAR Narrative with Audit Trail</h1>
+        <div className="prose max-w-none">
+          {sentences.map((sentence, index) => (
+            <span
+              key={index}
+              onClick={() => setSelectedIndex(index)}
+              className={cn(
+                "cursor-pointer rounded px-1 py-0.5 transition-all duration-200",
+                selectedIndex === index
+                  ? "bg-blue-100 ring-2 ring-blue-500"
+                  : "hover:bg-amber-50"
+              )}
+            >
+              <span className="text-blue-500 mr-1">📌</span>
+              {sentence}{' '}
+            </span>
+          ))}
+        </div>
+      </div>
 
-                st.markdown("### Confidence")
-                st.progress(evidence['confidence'] / 100)
+      {/* Right Panel: Evidence */}
+      <div className="w-1/2 p-6 overflow-y-auto bg-gray-50">
+        {selectedIndex === null ? (
+          <div className="flex items-center justify-center h-full text-gray-400">
+            Click a sentence to view evidence
+          </div>
+        ) : isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+          </div>
+        ) : evidence ? (
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold">🔍 Evidence</h2>
 
-                if evidence['confidence'] < 95:
-                    st.warning("⚠️ Low confidence - Review recommended")
-                else:
-                    st.success("✅ Verified against database")
+            {/* Data Source */}
+            <Card>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Data Source</h3>
+              <p className="font-mono text-sm bg-gray-100 p-2 rounded">
+                {evidence.dataSource}
+              </p>
+            </Card>
+
+            {/* SQL Query */}
+            <Card>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">SQL Query</h3>
+              <SyntaxHighlighter language="sql" style={vscDarkPlus}>
+                {evidence.query}
+              </SyntaxHighlighter>
+            </Card>
+
+            {/* Query Results */}
+            <Card>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Query Results</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      {Object.keys(evidence.results[0] || {}).map(key => (
+                        <th key={key} className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                          {key}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {evidence.results.map((row: Record<string, any>, i: number) => (
+                      <tr key={i}>
+                        {Object.values(row).map((val, j) => (
+                          <td key={j} className="px-4 py-2 text-sm">{String(val)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            {/* Confidence Score */}
+            <Card>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Confidence</h3>
+              <div className="w-full bg-gray-200 rounded-full h-4">
+                <div
+                  className={cn(
+                    "h-4 rounded-full transition-all",
+                    evidence.confidence >= 95 ? "bg-green-500" :
+                    evidence.confidence >= 70 ? "bg-yellow-500" : "bg-red-500"
+                  )}
+                  style={{ width: `${evidence.confidence}%` }}
+                />
+              </div>
+              <p className="text-sm mt-2">
+                {evidence.confidence}% confidence
+              </p>
+              {evidence.confidence < 95 ? (
+                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-amber-700 text-sm">
+                  ⚠️ Low confidence - Review recommended
+                </div>
+              ) : (
+                <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
+                  ✅ Verified against database
+                </div>
+              )}
+            </Card>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 ```
 
 ### **Phase 6: Predictive SAR Readiness Scoring**
@@ -888,7 +998,10 @@ if len(edit_tracker.edits) >= 500:
 | **Embeddings** | sentence-transformers | Free, fast, good quality |
 | **Database** | PostgreSQL 16 | Reliable, JSON support for audit logs |
 | **API Framework** | FastAPI 0.109 | Async, auto-docs, Python 3.10+ features |
-| **Frontend** | Streamlit 1.29 | Rapid prototyping, beautiful UI |
+| **Frontend** | React 18 + TypeScript | Production-ready, component-based, full control |
+| **UI Framework** | TailwindCSS + shadcn/ui | Modern styling, accessible components |
+| **State Management** | TanStack Query (React Query) | Server state, caching, real-time updates |
+| **Graph Visualization** | React Flow / D3.js | Interactive transaction flow diagrams |
 | **NLP** | spaCy 3.7 | NER for claim extraction |
 | **Graph Analysis** | NetworkX 3.2 | Transaction flow graphs |
 | **Diff Tracking** | difflib (stdlib) | Edit comparison |
@@ -913,15 +1026,719 @@ Development (Hackathon):
 ├─ LLM: Ollama (local server)
 ├─ Database: SQLite (demo) or PostgreSQL (local)
 ├─ Vector DB: ChromaDB (file-based)
-└─ Dashboard: Streamlit (localhost:8501)
+├─ Backend: FastAPI (localhost:8000)
+└─ Frontend: React + Vite (localhost:5173)
 
 Production (Scalable):
 ├─ LLM: Ollama on GPU server or Bedrock
 ├─ Database: PostgreSQL RDS (multi-AZ)
 ├─ Vector Store: Weaviate cluster or OpenSearch
 ├─ API: FastAPI on Kubernetes (3 replicas)
-├─ Frontend: Streamlit on ECS (load balanced)
+├─ Frontend: React on Vercel/Netlify or S3+CloudFront
 └─ Queue: Redis for async SAR generation
+```
+
+### **React Frontend Architecture**
+
+```
+frontend/
+├── src/
+│   ├── components/
+│   │   ├── layout/
+│   │   │   ├── Sidebar.tsx              # Navigation menu
+│   │   │   ├── Header.tsx               # Top bar with user info
+│   │   │   └── Layout.tsx               # Main layout wrapper
+│   │   ├── alerts/
+│   │   │   ├── AlertList.tsx            # Alert queue table
+│   │   │   ├── AlertCard.tsx            # Individual alert summary
+│   │   │   └── AlertFilters.tsx         # Filter by risk, typology
+│   │   ├── sar/
+│   │   │   ├── SARGenerator.tsx         # Main SAR generation view
+│   │   │   ├── NarrativePanel.tsx       # Left panel: SAR text
+│   │   │   ├── AuditTrailPanel.tsx      # Right panel: Evidence
+│   │   │   ├── SentenceHighlight.tsx    # Clickable sentence component
+│   │   │   ├── EvidenceDrawer.tsx       # Slide-out evidence details
+│   │   │   └── SAREditor.tsx            # Rich text editor for edits
+│   │   ├── transactions/
+│   │   │   ├── TransactionTable.tsx     # Sortable data grid
+│   │   │   ├── TransactionGraph.tsx     # React Flow diagram
+│   │   │   └── TransactionTimeline.tsx  # Chronological view
+│   │   ├── audit/
+│   │   │   ├── AuditLog.tsx             # Full audit history
+│   │   │   ├── QueryViewer.tsx          # SQL query + results
+│   │   │   ├── ConfidenceBar.tsx        # Visual confidence score
+│   │   │   └── ReasoningTrace.tsx       # LLM reasoning display
+│   │   └── common/
+│   │       ├── Button.tsx
+│   │       ├── Card.tsx
+│   │       ├── Modal.tsx
+│   │       ├── DataTable.tsx
+│   │       └── LoadingSpinner.tsx
+│   ├── pages/
+│   │   ├── Dashboard.tsx                # Overview metrics
+│   │   ├── Alerts.tsx                   # Alert queue
+│   │   ├── SARWorkspace.tsx             # SAR generation + review
+│   │   ├── History.tsx                  # Past SARs
+│   │   └── Settings.tsx                 # User preferences
+│   ├── hooks/
+│   │   ├── useAlerts.ts                 # Fetch alerts
+│   │   ├── useSARGeneration.ts          # Generate SAR mutation
+│   │   ├── useAuditTrail.ts             # Fetch evidence
+│   │   ├── useTransactions.ts           # Transaction data
+│   │   └── useWebSocket.ts              # Real-time updates
+│   ├── services/
+│   │   ├── api.ts                       # Axios instance + interceptors
+│   │   ├── alertService.ts              # Alert API calls
+│   │   ├── sarService.ts                # SAR generation API
+│   │   └── auditService.ts              # Audit trail API
+│   ├── store/
+│   │   └── queryClient.ts               # TanStack Query config
+│   ├── types/
+│   │   ├── alert.ts                     # Alert type definitions
+│   │   ├── sar.ts                       # SAR type definitions
+│   │   ├── transaction.ts               # Transaction types
+│   │   └── audit.ts                     # Audit trail types
+│   ├── utils/
+│   │   ├── formatters.ts                # Currency, date formatting
+│   │   └── constants.ts                 # FinCEN codes, typologies
+│   ├── App.tsx
+│   ├── main.tsx
+│   └── index.css                        # TailwindCSS imports
+├── package.json
+├── vite.config.ts
+├── tailwind.config.js
+└── tsconfig.json
+```
+
+### **Key React Components**
+
+#### **1. SAR Workspace (Main View)**
+```tsx
+// pages/SARWorkspace.tsx
+import { useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { useSARGeneration } from '@/hooks/useSARGeneration';
+import { useAuditTrail } from '@/hooks/useAuditTrail';
+import NarrativePanel from '@/components/sar/NarrativePanel';
+import AuditTrailPanel from '@/components/sar/AuditTrailPanel';
+import TransactionGraph from '@/components/transactions/TransactionGraph';
+
+export default function SARWorkspace() {
+  const { alertId } = useParams<{ alertId: string }>();
+  const [selectedSentence, setSelectedSentence] = useState<number | null>(null);
+
+  const { data: sar, isLoading, mutate: generateSAR } = useSARGeneration(alertId);
+  const { data: evidence } = useAuditTrail(alertId, selectedSentence);
+
+  return (
+    <div className="h-screen flex flex-col">
+      {/* Header with alert info */}
+      <header className="border-b p-4 flex justify-between items-center">
+        <div>
+          <h1 className="text-xl font-bold">SAR Generator</h1>
+          <span className="text-sm text-gray-500">Alert: {alertId}</span>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => generateSAR()}>Generate SAR</Button>
+          <Button variant="outline">Export PDF</Button>
+          <Button variant="success">Approve & Submit</Button>
+        </div>
+      </header>
+
+      {/* Main content: Split view */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left: Narrative */}
+        <div className="w-1/2 border-r overflow-y-auto p-4">
+          <NarrativePanel
+            narrative={sar?.narrative}
+            onSentenceClick={setSelectedSentence}
+            selectedSentence={selectedSentence}
+          />
+        </div>
+
+        {/* Right: Audit Trail */}
+        <div className="w-1/2 overflow-y-auto p-4 bg-gray-50">
+          <AuditTrailPanel evidence={evidence} />
+        </div>
+      </div>
+
+      {/* Bottom: Transaction Graph */}
+      <div className="h-64 border-t">
+        <TransactionGraph alertId={alertId} />
+      </div>
+    </div>
+  );
+}
+```
+
+#### **2. Interactive Narrative Panel**
+```tsx
+// components/sar/NarrativePanel.tsx
+import { cn } from '@/utils/cn';
+
+interface NarrativePanelProps {
+  narrative: string | undefined;
+  onSentenceClick: (index: number) => void;
+  selectedSentence: number | null;
+}
+
+export default function NarrativePanel({
+  narrative,
+  onSentenceClick,
+  selectedSentence
+}: NarrativePanelProps) {
+  if (!narrative) {
+    return (
+      <div className="flex items-center justify-center h-full text-gray-400">
+        Click "Generate SAR" to create narrative
+      </div>
+    );
+  }
+
+  const sentences = narrative.split(/(?<=[.!?])\s+/);
+
+  return (
+    <div className="prose max-w-none">
+      <h2 className="text-lg font-semibold mb-4">Draft SAR Narrative</h2>
+      <div className="space-y-1">
+        {sentences.map((sentence, index) => (
+          <span
+            key={index}
+            onClick={() => onSentenceClick(index)}
+            className={cn(
+              "cursor-pointer px-1 rounded transition-colors inline",
+              selectedSentence === index
+                ? "bg-blue-200 border-l-4 border-blue-500"
+                : "hover:bg-yellow-100"
+            )}
+          >
+            {sentence}{' '}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+#### **3. Audit Trail Evidence Panel**
+```tsx
+// components/sar/AuditTrailPanel.tsx
+import { Card } from '@/components/common/Card';
+import ConfidenceBar from '@/components/audit/ConfidenceBar';
+import QueryViewer from '@/components/audit/QueryViewer';
+
+interface Evidence {
+  sentence: string;
+  dataSource: string;
+  sqlQuery: string;
+  queryResults: Record<string, any>[];
+  confidence: number;
+  reasoning: string;
+}
+
+export default function AuditTrailPanel({ evidence }: { evidence?: Evidence }) {
+  if (!evidence) {
+    return (
+      <div className="flex items-center justify-center h-full text-gray-400">
+        <p>Click a sentence to view evidence</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Evidence Trail</h2>
+
+      {/* Selected sentence */}
+      <Card>
+        <h3 className="font-medium text-sm text-gray-500">Selected Claim</h3>
+        <p className="mt-1 text-gray-900">{evidence.sentence}</p>
+      </Card>
+
+      {/* Confidence score */}
+      <Card>
+        <h3 className="font-medium text-sm text-gray-500">Confidence</h3>
+        <ConfidenceBar value={evidence.confidence} />
+        {evidence.confidence < 95 && (
+          <p className="text-amber-600 text-sm mt-2">
+            ⚠️ Low confidence - Review recommended
+          </p>
+        )}
+      </Card>
+
+      {/* Data source */}
+      <Card>
+        <h3 className="font-medium text-sm text-gray-500">Data Source</h3>
+        <p className="mt-1 font-mono text-sm">{evidence.dataSource}</p>
+      </Card>
+
+      {/* SQL Query */}
+      <Card>
+        <h3 className="font-medium text-sm text-gray-500">SQL Query</h3>
+        <QueryViewer query={evidence.sqlQuery} results={evidence.queryResults} />
+      </Card>
+
+      {/* Reasoning */}
+      <Card>
+        <h3 className="font-medium text-sm text-gray-500">LLM Reasoning</h3>
+        <p className="mt-1 text-sm text-gray-700">{evidence.reasoning}</p>
+      </Card>
+    </div>
+  );
+}
+```
+
+#### **4. Transaction Flow Graph (React Flow)**
+```tsx
+// components/transactions/TransactionGraph.tsx
+import ReactFlow, {
+  Node,
+  Edge,
+  Background,
+  Controls,
+  MiniMap
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+import { useTransactionGraph } from '@/hooks/useTransactionGraph';
+
+export default function TransactionGraph({ alertId }: { alertId: string }) {
+  const { data } = useTransactionGraph(alertId);
+
+  const nodes: Node[] = data?.accounts.map((account, i) => ({
+    id: account.id,
+    position: { x: i * 200, y: account.isSubject ? 150 : (i % 2) * 300 },
+    data: {
+      label: (
+        <div className="text-center">
+          <div className="font-bold">{account.id}</div>
+          <div className="text-xs">{account.location}</div>
+        </div>
+      )
+    },
+    style: {
+      background: account.isHighRisk ? '#fee2e2' : '#dcfce7',
+      border: account.isSubject ? '3px solid #3b82f6' : '1px solid #ccc',
+    }
+  })) ?? [];
+
+  const edges: Edge[] = data?.transactions.map((txn) => ({
+    id: txn.id,
+    source: txn.source,
+    target: txn.destination,
+    label: `₹${txn.amount.toLocaleString()}\n${txn.date}`,
+    animated: true,
+    style: { stroke: '#6366f1' }
+  })) ?? [];
+
+  return (
+    <ReactFlow nodes={nodes} edges={edges} fitView>
+      <Background />
+      <Controls />
+      <MiniMap />
+    </ReactFlow>
+  );
+}
+```
+
+#### **5. API Service Layer**
+```typescript
+// services/sarService.ts
+import api from './api';
+import { SAR, SARGenerationRequest, AuditEvidence } from '@/types/sar';
+
+export const sarService = {
+  // Generate SAR narrative
+  generate: async (alertId: string): Promise<SAR> => {
+    const response = await api.post<SAR>(`/api/sar/generate`, { alertId });
+    return response.data;
+  },
+
+  // Get evidence for specific sentence
+  getEvidence: async (sarId: string, sentenceIndex: number): Promise<AuditEvidence> => {
+    const response = await api.get<AuditEvidence>(
+      `/api/sar/${sarId}/evidence/${sentenceIndex}`
+    );
+    return response.data;
+  },
+
+  // Update narrative (analyst edits)
+  updateNarrative: async (sarId: string, narrative: string): Promise<SAR> => {
+    const response = await api.patch<SAR>(`/api/sar/${sarId}`, { narrative });
+    return response.data;
+  },
+
+  // Approve and submit
+  submit: async (sarId: string): Promise<{ filingId: string }> => {
+    const response = await api.post(`/api/sar/${sarId}/submit`);
+    return response.data;
+  },
+
+  // Export as PDF
+  exportPDF: async (sarId: string): Promise<Blob> => {
+    const response = await api.get(`/api/sar/${sarId}/export`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+};
+```
+
+#### **6. Custom Hooks with TanStack Query**
+```typescript
+// hooks/useSARGeneration.ts
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { sarService } from '@/services/sarService';
+
+export function useSARGeneration(alertId: string | undefined) {
+  const queryClient = useQueryClient();
+
+  // Fetch existing SAR if any
+  const query = useQuery({
+    queryKey: ['sar', alertId],
+    queryFn: () => sarService.getByAlertId(alertId!),
+    enabled: !!alertId,
+  });
+
+  // Generate new SAR
+  const mutation = useMutation({
+    mutationFn: () => sarService.generate(alertId!),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['sar', alertId], data);
+    },
+  });
+
+  return {
+    data: query.data,
+    isLoading: query.isLoading || mutation.isPending,
+    error: query.error || mutation.error,
+    mutate: mutation.mutate,
+  };
+}
+
+// hooks/useAuditTrail.ts
+export function useAuditTrail(alertId: string | undefined, sentenceIndex: number | null) {
+  return useQuery({
+    queryKey: ['audit', alertId, sentenceIndex],
+    queryFn: () => sarService.getEvidence(alertId!, sentenceIndex!),
+    enabled: !!alertId && sentenceIndex !== null,
+  });
+}
+```
+
+### **Frontend Package Dependencies**
+
+```json
+{
+  "name": "sar-generator-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext ts,tsx"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.21.0",
+    "@tanstack/react-query": "^5.17.0",
+    "axios": "^1.6.5",
+    "reactflow": "^11.10.1",
+    "lucide-react": "^0.303.0",
+    "clsx": "^2.1.0",
+    "tailwind-merge": "^2.2.0",
+    "@radix-ui/react-dialog": "^1.0.5",
+    "@radix-ui/react-dropdown-menu": "^2.0.6",
+    "@radix-ui/react-tabs": "^1.0.4",
+    "date-fns": "^3.2.0",
+    "recharts": "^2.10.3"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.47",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.11",
+    "eslint": "^8.56.0"
+  }
+}
+```
+
+### **FastAPI Backend for React Frontend**
+
+```
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                     # FastAPI app entry point
+│   ├── config.py                   # Environment configuration
+│   ├── routers/
+│   │   ├── __init__.py
+│   │   ├── alerts.py               # GET /api/alerts, GET /api/alerts/{id}
+│   │   ├── sar.py                  # POST /api/sar/generate, GET /api/sar/{id}
+│   │   ├── audit.py                # GET /api/sar/{id}/evidence/{index}
+│   │   ├── transactions.py         # GET /api/transactions, graph data
+│   │   └── export.py               # GET /api/sar/{id}/export (PDF)
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── sar_generator.py        # Multi-agent pipeline orchestration
+│   │   ├── audit_trail.py          # Audit logging and retrieval
+│   │   ├── fact_checker.py         # Claim verification
+│   │   └── pdf_generator.py        # PDF export with audit package
+│   ├── agents/
+│   │   ├── __init__.py
+│   │   ├── data_analyst.py         # Agent 1: SQL queries
+│   │   ├── compliance.py           # Agent 2: Typology classification
+│   │   ├── writer.py               # Agent 3: Narrative generation
+│   │   ├── fact_checker.py         # Agent 4: Verification
+│   │   └── editor.py               # Agent 5: Polish
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── alert.py                # Pydantic models
+│   │   ├── sar.py
+│   │   ├── transaction.py
+│   │   └── audit.py
+│   ├── db/
+│   │   ├── __init__.py
+│   │   ├── database.py             # SQLAlchemy setup
+│   │   ├── models.py               # ORM models
+│   │   └── crud.py                 # Database operations
+│   └── knowledge_base/
+│       ├── __init__.py
+│       ├── vector_store.py         # ChromaDB operations
+│       └── embeddings.py           # Sentence transformers
+├── requirements.txt
+├── Dockerfile
+└── docker-compose.yml
+```
+
+#### **FastAPI Routes Implementation**
+
+```python
+# app/main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.routers import alerts, sar, audit, transactions, export
+
+app = FastAPI(
+    title="SAR Narrative Generator API",
+    description="AI-powered SAR generation with audit trail",
+    version="1.0.0"
+)
+
+# CORS for React frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Vite dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(alerts.router, prefix="/api/alerts", tags=["Alerts"])
+app.include_router(sar.router, prefix="/api/sar", tags=["SAR"])
+app.include_router(audit.router, prefix="/api/audit", tags=["Audit"])
+app.include_router(transactions.router, prefix="/api/transactions", tags=["Transactions"])
+app.include_router(export.router, prefix="/api/export", tags=["Export"])
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+```
+
+```python
+# app/routers/sar.py
+from fastapi import APIRouter, HTTPException, BackgroundTasks
+from app.services.sar_generator import SARGenerator
+from app.models.sar import SARRequest, SARResponse, SARStatus
+
+router = APIRouter()
+sar_generator = SARGenerator()
+
+@router.post("/generate", response_model=SARResponse)
+async def generate_sar(request: SARRequest, background_tasks: BackgroundTasks):
+    """
+    Generate SAR narrative for an alert.
+    Returns immediately with task_id, generation happens in background.
+    """
+    task_id = await sar_generator.start_generation(request.alert_id)
+    return SARResponse(
+        task_id=task_id,
+        status=SARStatus.PROCESSING,
+        message="SAR generation started"
+    )
+
+@router.get("/{sar_id}")
+async def get_sar(sar_id: str):
+    """Get SAR by ID with full narrative and metadata."""
+    sar = await sar_generator.get_sar(sar_id)
+    if not sar:
+        raise HTTPException(status_code=404, detail="SAR not found")
+    return sar
+
+@router.get("/{sar_id}/evidence/{sentence_index}")
+async def get_evidence(sar_id: str, sentence_index: int):
+    """Get audit evidence for a specific sentence in the SAR."""
+    evidence = await sar_generator.get_evidence(sar_id, sentence_index)
+    if not evidence:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    return evidence
+
+@router.patch("/{sar_id}")
+async def update_sar(sar_id: str, narrative: str):
+    """Update SAR narrative (analyst edits)."""
+    updated = await sar_generator.update_narrative(sar_id, narrative)
+    return updated
+
+@router.post("/{sar_id}/submit")
+async def submit_sar(sar_id: str):
+    """Approve and submit SAR for regulatory filing."""
+    result = await sar_generator.submit(sar_id)
+    return result
+```
+
+```python
+# app/routers/transactions.py
+from fastapi import APIRouter
+from app.db.crud import get_transactions, get_transaction_graph
+
+router = APIRouter()
+
+@router.get("/")
+async def list_transactions(alert_id: str, limit: int = 100):
+    """Get transactions for an alert."""
+    return await get_transactions(alert_id, limit)
+
+@router.get("/graph/{alert_id}")
+async def get_graph(alert_id: str):
+    """
+    Get transaction flow graph data for React Flow visualization.
+    Returns nodes (accounts) and edges (transactions).
+    """
+    graph_data = await get_transaction_graph(alert_id)
+    return {
+        "accounts": [
+            {
+                "id": node["account_id"],
+                "location": node["location"],
+                "isSubject": node["is_subject"],
+                "isHighRisk": node["is_high_risk"]
+            }
+            for node in graph_data["nodes"]
+        ],
+        "transactions": [
+            {
+                "id": edge["txn_id"],
+                "source": edge["source"],
+                "destination": edge["dest"],
+                "amount": edge["amount"],
+                "date": edge["date"].isoformat()
+            }
+            for edge in graph_data["edges"]
+        ]
+    }
+```
+
+#### **WebSocket for Real-Time Updates**
+
+```python
+# app/routers/websocket.py
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from app.services.sar_generator import SARGenerator
+
+router = APIRouter()
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[str, WebSocket] = {}
+
+    async def connect(self, task_id: str, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections[task_id] = websocket
+
+    def disconnect(self, task_id: str):
+        self.active_connections.pop(task_id, None)
+
+    async def send_progress(self, task_id: str, data: dict):
+        if websocket := self.active_connections.get(task_id):
+            await websocket.send_json(data)
+
+manager = ConnectionManager()
+
+@router.websocket("/ws/sar/{task_id}")
+async def websocket_endpoint(websocket: WebSocket, task_id: str):
+    """
+    WebSocket for real-time SAR generation progress.
+    Sends updates as each agent completes its work.
+    """
+    await manager.connect(task_id, websocket)
+    try:
+        while True:
+            # Keep connection alive, send progress from generator
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(task_id)
+
+# Usage in sar_generator.py:
+# await manager.send_progress(task_id, {
+#     "stage": "data_analyst",
+#     "status": "complete",
+#     "progress": 20
+# })
+```
+
+#### **Pydantic Models for API**
+
+```python
+# app/models/sar.py
+from pydantic import BaseModel
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+
+class SARStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    DRAFT = "draft"
+    APPROVED = "approved"
+    SUBMITTED = "submitted"
+
+class SARRequest(BaseModel):
+    alert_id: str
+
+class SARResponse(BaseModel):
+    task_id: str
+    status: SARStatus
+    message: str
+
+class SARNarrative(BaseModel):
+    id: str
+    alert_id: str
+    narrative: str
+    typology: str
+    fincen_code: str
+    created_at: datetime
+    status: SARStatus
+    confidence_score: float
+    sentence_count: int
+
+class AuditEvidence(BaseModel):
+    sentence: str
+    sentence_index: int
+    data_source: str
+    sql_query: str
+    query_results: list[dict]
+    confidence: float
+    reasoning: str
+    template_used: Optional[str]
+    llm_prompt: Optional[str]
+    llm_response: Optional[str]
 ```
 
 ---
@@ -1544,58 +2361,243 @@ Trend: Decreasing over time (system learns preferences)
 
 ### **Demo Strategy**
 
-**Story-Driven Approach:**
-```
-"Compliance Officer Priya receives alert: Suspicious structuring..."
+**Story-Driven Approach with React UI:**
 
-[Dashboard shows alert card]
-├─ Alert ID: ALT_001
-├─ Risk: 94 (HIGH)
-├─ Customer: Rajesh Kumar
-├─ Pattern: 47 cash deposits, ₹50L in 7 days
+```
+SCENE 1: Dashboard Landing
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"Compliance Officer Priya logs in to SAR Generator..."
+
+┌─────────────────────────────────────────────────────────────┐
+│ 🏦 SAR Generator                    Priya Shah ▼   🔔 3    │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  📊 Dashboard Overview                                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │ Pending  │  │ In Review│  │ Approved │  │ Submitted│   │
+│  │   12     │  │    5     │  │    8     │  │   142    │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+│                                                             │
+│  🚨 High Priority Alerts                                    │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ ALT_001 │ Structuring │ Risk: 94 │ Rajesh Kumar    →│   │
+│  │ ALT_002 │ Layering    │ Risk: 87 │ Priya Shah      →│   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+
+SCENE 2: Alert Detail + SAR Generation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Priya clicks ALT_001]
+
+┌─────────────────────────────────────────────────────────────┐
+│ Alert: ALT_001                    [Generate SAR] [Export]   │
+├─────────────────────────────────────────────────────────────┤
+│ Customer: Rajesh Kumar    │  Typology: Structuring         │
+│ Account: ****6789         │  Risk Score: 94/100 🔴         │
+│ Period: Jan 5-12, 2026    │  Transactions: 47              │
+├─────────────────────────────────────────────────────────────┤
+│                   Transaction Flow Graph                    │
+│                                                             │
+│    [Acc A]──₹98K──→[Subject]──₹48.5L──→[Offshore]         │
+│    [Acc B]──₹95K──↗         ↖──₹92K──[Acc C]              │
+│    [Acc D]──₹97K──↗                                        │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 
 [Priya clicks "Generate SAR"]
-[Loading animation: 30 seconds]
+[Animated progress: Agent 1 → Agent 2 → Agent 3 → Agent 4 → Agent 5]
 
-[Split screen appears]
-LEFT: Draft SAR Narrative (5 paragraphs)
-RIGHT: Audit Trail Panel
+SCENE 3: Split View - Narrative + Audit Trail
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┌─────────────────────────────┬───────────────────────────────┐
+│   📄 Draft SAR Narrative    │   🔍 Evidence Trail           │
+├─────────────────────────────┼───────────────────────────────┤
+│                             │                               │
+│ Review of account activity  │  Click a sentence to view     │
+│ for Rajesh Kumar (PAN:      │  supporting evidence...       │
+│ ABCDE1234F), savings        │                               │
+│ account #****6789, revealed │                               │
+│ suspicious transaction      │                               │
+│ patterns during the period  │                               │
+│ January 5-12, 2026.         │                               │
+│                             │                               │
+│ [The subject received 47    │  ← SELECTED                   │
+│  separate deposits totaling │                               │
+│  ₹50,00,000] ← CLICK THIS   │                               │
+│                             │                               │
+│ Individual deposit amounts  │                               │
+│ ranged from ₹75,000 to      │                               │
+│ ₹1,95,000...                │                               │
+│                             │                               │
+└─────────────────────────────┴───────────────────────────────┘
 
-[Priya clicks first sentence]
-"The subject received 47 separate deposits totaling ₹50,00,000"
+SCENE 4: Evidence Panel Expands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Priya clicks the highlighted sentence]
 
-[Evidence panel expands]
-├─ Data Source: Transaction table
-├─ SQL Query: SELECT COUNT(*)...
-├─ Result: count=47, sum=5000000
-├─ Confidence: 100% ✅
-└─ [View Raw Data] button
+┌─────────────────────────────┬───────────────────────────────┐
+│   📄 Draft SAR Narrative    │   🔍 Evidence Trail           │
+├─────────────────────────────┼───────────────────────────────┤
+│                             │                               │
+│ ...                         │  📌 Selected Claim            │
+│                             │  "The subject received 47     │
+│ ██████████████████████████  │   separate deposits totaling  │
+│ █ The subject received 47 █ │   ₹50,00,000"                 │
+│ █ separate deposits       █ │                               │
+│ █ totaling ₹50,00,000     █ │  ━━━━━━━━━━━━━━━━━━━━━━━━━   │
+│ ██████████████████████████  │                               │
+│                             │  📊 Data Source               │
+│ ...                         │  transactions_table           │
+│                             │                               │
+│                             │  💻 SQL Query                 │
+│                             │  ┌─────────────────────────┐  │
+│                             │  │ SELECT COUNT(*),        │  │
+│                             │  │   SUM(amount)           │  │
+│                             │  │ FROM transactions       │  │
+│                             │  │ WHERE account='123...'  │  │
+│                             │  │ AND date BETWEEN...     │  │
+│                             │  └─────────────────────────┘  │
+│                             │                               │
+│                             │  📋 Results                   │
+│                             │  ┌───────────┬────────────┐  │
+│                             │  │ count     │ sum        │  │
+│                             │  ├───────────┼────────────┤  │
+│                             │  │ 47        │ 5000000    │  │
+│                             │  └───────────┴────────────┘  │
+│                             │                               │
+│                             │  ✅ Confidence: 100%          │
+│                             │  ████████████████████ 100%   │
+│                             │                               │
+│                             │  ✅ Verified against database │
+│                             │                               │
+└─────────────────────────────┴───────────────────────────────┘
 
-[Priya clicks "Approve"]
-[System logs approval, generates PDF]
+SCENE 5: Approval Flow
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Priya clicks "Approve & Submit"]
 
-"Time saved: 4 hours. Quality: 99.8% factual accuracy.
- Regulatory compliance: ✅ Full audit trail for defense."
+┌─────────────────────────────────────────────────────────────┐
+│                    ✅ SAR Submitted                         │
+│                                                             │
+│   Filing ID: SAR_2026_00123                                │
+│   Status: Submitted to FinCEN                              │
+│                                                             │
+│   ┌─────────────────────────────────────────────────────┐  │
+│   │ 📊 Session Summary                                  │  │
+│   ├─────────────────────────────────────────────────────┤  │
+│   │ Time saved:           4 hours                       │  │
+│   │ Factual accuracy:     99.8%                         │  │
+│   │ Claims verified:      23/23 ✅                      │  │
+│   │ Analyst edits:        2 minor                       │  │
+│   │ Audit trail:          Complete                      │  │
+│   └─────────────────────────────────────────────────────┘  │
+│                                                             │
+│   [Download PDF]  [View Audit Package]  [Back to Dashboard] │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Wow Factors:**
-- Live fact verification (click → see evidence instantly)
-- Transaction flow diagram (visual graph)
-- Constitutional AI self-critique (show before/after revision)
-- Edit tracking (system learns from Priya's changes)
+**React UI Wow Factors:**
+- **Smooth animations** - Framer Motion transitions between views
+- **Real-time progress** - WebSocket updates during SAR generation
+- **Interactive graph** - React Flow with zoom, pan, node highlighting
+- **Click-to-reveal evidence** - Instant panel updates with TanStack Query caching
+- **Dark/Light mode** - Professional theming with TailwindCSS
+- **Keyboard shortcuts** - Navigate sentences with arrow keys
+- **Export options** - PDF generation with audit package
+- **Mobile responsive** - Works on tablets for field investigators
 
 ### **Team Composition**
 
 **Ideal 4-Person Team:**
-1. **NLP Lead:** LLM prompting, RAG, Constitutional AI
-2. **Backend Engineer:** FastAPI, database, audit trail
-3. **Frontend Engineer:** Streamlit, interactive audit explorer
-4. **Compliance Expert:** Domain knowledge, SAR format validation
+1. **NLP/AI Lead:** LLM prompting, RAG, Constitutional AI, LangGraph agents
+2. **Backend Engineer:** FastAPI, PostgreSQL, audit trail, WebSocket
+3. **Frontend Engineer:** React, TypeScript, TailwindCSS, React Flow
+4. **Compliance Expert:** Domain knowledge, SAR format validation, test data
 
 **Hackathon Timeline (3 weeks):**
-- Week 1: Knowledge base + RAG + baseline generation
-- Week 2: Multi-agent pipeline + fact verification + audit trail
-- Week 3: Dashboard + interactive features + demo polish
+
+```
+WEEK 1: Foundation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Day 1-2: Project Setup
+├─ NLP Lead: Ollama setup, LangChain config
+├─ Backend: FastAPI scaffold, PostgreSQL schema
+├─ Frontend: Vite + React + TailwindCSS setup
+└─ Compliance: Gather FinCEN typologies, sample SARs
+
+Day 3-4: Knowledge Base
+├─ NLP Lead: ChromaDB setup, embed regulatory docs
+├─ Backend: Database models, CRUD operations
+├─ Frontend: Component library (Button, Card, Table)
+└─ Compliance: Write 10 synthetic SAR scenarios
+
+Day 5-7: Basic RAG Pipeline
+├─ NLP Lead: Simple narrative generation with RAG
+├─ Backend: /api/sar/generate endpoint
+├─ Frontend: Alert list page, basic SAR view
+└─ Compliance: Validate output format
+
+WEEK 2: Core Features
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Day 8-10: Multi-Agent Pipeline
+├─ NLP Lead: Implement 5 agents in LangGraph
+├─ Backend: WebSocket for progress updates
+├─ Frontend: SAR workspace split view
+└─ Compliance: Test typology classification
+
+Day 11-12: Fact Verification
+├─ NLP Lead: Claim extraction + verification logic
+├─ Backend: Audit trail storage, evidence API
+├─ Frontend: Clickable sentences, evidence panel
+└─ Compliance: Verify fact-checking accuracy
+
+Day 13-14: Transaction Graph
+├─ NLP Lead: NetworkX graph analysis
+├─ Backend: /api/transactions/graph endpoint
+├─ Frontend: React Flow integration
+└─ Compliance: Test circular flow detection
+
+WEEK 3: Polish & Demo
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Day 15-16: UI/UX Enhancement
+├─ NLP Lead: Constitutional AI refinement
+├─ Backend: PDF export, approval workflow
+├─ Frontend: Animations, dark mode, responsiveness
+└─ Compliance: End-to-end scenario testing
+
+Day 17-18: Integration Testing
+├─ All: Bug fixes, edge cases
+├─ Backend: Performance optimization
+├─ Frontend: Loading states, error handling
+└─ Compliance: 50 scenario validation
+
+Day 19-21: Demo Preparation
+├─ NLP Lead: Demo script, talking points
+├─ Backend: Seed data, reset scripts
+├─ Frontend: Demo flow polish
+└─ Compliance: Regulatory accuracy review
+```
+
+**Parallel Development Strategy:**
+```
+Frontend can start with mock data while backend develops:
+
+1. Frontend mocks API responses:
+   // services/mockApi.ts
+   export const mockSAR = {
+     narrative: "Review of account activity...",
+     sentences: [...],
+     evidence: {...}
+   };
+
+2. Backend implements real endpoints
+
+3. Switch from mock to real API:
+   // services/api.ts
+   const USE_MOCK = import.meta.env.DEV && false;
+   export const getSAR = USE_MOCK ? mockApi.getSAR : realApi.getSAR;
+```
 
 ### **Why SAR > Pre-Delinquency** (If you have strong NLP team)
 
